@@ -23,16 +23,16 @@
  */
 package hudson.plugins.ec2.ssh;
 
-import hudson.FilePath;
-import hudson.Util;
-import hudson.ProxyConfiguration;
-import hudson.model.Descriptor;
-import hudson.model.TaskListener;
-import hudson.plugins.ec2.*;
-import hudson.remoting.Channel;
-import hudson.remoting.Channel.Listener;
-import hudson.slaves.CommandLauncher;
-import hudson.slaves.ComputerLauncher;
+import com.amazonaws.AmazonClientException;
+import com.amazonaws.services.ec2.model.Instance;
+import com.amazonaws.services.ec2.model.KeyPair;
+import com.trilead.ssh2.Connection;
+import com.trilead.ssh2.HTTPProxyData;
+import com.trilead.ssh2.SCPClient;
+import com.trilead.ssh2.ServerHostKeyVerifier;
+import com.trilead.ssh2.Session;
+
+import org.apache.commons.io.IOUtils;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -45,18 +45,25 @@ import java.nio.charset.StandardCharsets;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import hudson.FilePath;
+import hudson.ProxyConfiguration;
+import hudson.Util;
+import hudson.model.Descriptor;
+import hudson.model.TaskListener;
+import hudson.plugins.ec2.ConnectionStrategy;
+import hudson.plugins.ec2.EC2AbstractSlave;
+import hudson.plugins.ec2.EC2Cloud;
+import hudson.plugins.ec2.EC2Computer;
+import hudson.plugins.ec2.EC2ComputerLauncher;
+import hudson.plugins.ec2.EC2HostAddressProvider;
+import hudson.plugins.ec2.EC2Readiness;
+import hudson.plugins.ec2.EC2SpotSlave;
+import hudson.plugins.ec2.SlaveTemplate;
+import hudson.remoting.Channel;
+import hudson.remoting.Channel.Listener;
+import hudson.slaves.CommandLauncher;
+import hudson.slaves.ComputerLauncher;
 import jenkins.model.Jenkins;
-
-import org.apache.commons.io.IOUtils;
-
-import com.amazonaws.AmazonClientException;
-import com.amazonaws.services.ec2.model.Instance;
-import com.amazonaws.services.ec2.model.KeyPair;
-import com.trilead.ssh2.Connection;
-import com.trilead.ssh2.HTTPProxyData;
-import com.trilead.ssh2.SCPClient;
-import com.trilead.ssh2.ServerHostKeyVerifier;
-import com.trilead.ssh2.Session;
 
 /**
  * {@link ComputerLauncher} that connects to a Unix slave on EC2 by using SSH.
@@ -341,6 +348,14 @@ public class EC2UnixLauncher extends EC2ComputerLauncher {
                             + " seconds of waiting for ssh to become available. (maximum timeout configured is "
                             + (timeout / 1000) + ")");
                 }
+
+                if ((computer.getNode() instanceof EC2SpotSlave) && computer.getInstanceId() == null) {
+                     // getInstanceId() on EC2SpotSlave can return null if the spot request doesn't yet know
+                     // the instance id that it is starting. Continue to wait until the instanceId is set.
+                    logInfo(computer, listener, "empty instanceId for Spot Slave.");
+                    throw new IOException("goto sleep");
+                }
+
                 String host = getEC2HostAddress(computer);
 
                 if ("0.0.0.0".equals(host)) {
